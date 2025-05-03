@@ -29,7 +29,7 @@ public class EmailUtil {
      * @return true if email is sent successfully, false otherwise.
      */
     public boolean sendPasswordResetEmail(String toEmail, String subject, String body, String resetLink) {
-        String formattedBody = body;
+        String formattedBody = body + "\n\n" + resetLink;
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);

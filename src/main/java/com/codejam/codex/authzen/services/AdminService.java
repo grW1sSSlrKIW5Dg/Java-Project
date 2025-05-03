@@ -104,29 +104,31 @@ public class AdminService {
 
 
     public String delegatePermissions(DelegateRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+       User user = userRepository.findById(request.getUserId())
+        .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<Role> roles = roleRepository.findByName(request.getRole());
-        if (roles.isEmpty()) {
-            throw new RuntimeException("Role not found");
-        }
+        Role role = roleRepository.findByName(request.getRole())
+            .stream()
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("Role not found: " + request.getRole()));
 
-
-        boolean alreadyAssigned = user.getUserRoles().stream()
-                .map(userRole -> userRole.getRole().getName())
-                .noneMatch(roleName -> roleName.equals(user.getUsername()));
+        boolean alreadyAssigned = user.getUserRoles()
+            .stream()
+            .anyMatch(userRole -> userRole.getRole().getName().equals(request.getRole()));
+        
         if (alreadyAssigned) {
             return "User already has this role";
         }
 
         UserRole userRole = new UserRole();
-        userRole.setUser(new User());
-        userRole.setRole(new Role());
-
-        user.getUserRoles().add(new UserRole());
-        userRepository.save(new User());
-        logAction(adminUsername, "Permissions delegated successfully");
+        userRole.setUser(user);
+        userRole.setRole(role);
+        user.getUserRoles().add(userRole);
+        
+        userRepository.save(user);
+        
+        logAction(adminUsername, "Permissions delegated successfully. Role: " + request.getRole() + 
+                ", Reason: " + request.getReason());
 
         return "Permissions delegated successfully";
     }
