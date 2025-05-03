@@ -1,10 +1,10 @@
 spring:
   application:
-    name: ${SPRING_APPLICATION_NAME}
+    name: authzen
   datasource:
-    url: ${SPRING_DATASOURCE_URL}
-    username: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    url: jdbc:mysql://localhost:3306/authzen
+    username: root
+    password: 1234
   jpa:
     hibernate:
       ddl-auto: update
@@ -12,13 +12,13 @@ spring:
     database-platform: org.hibernate.dialect.MySQL8Dialect
   security:
     user:
-      name:  ${ADMIN_USERNAME}
-      password:  ${ADMIN_PASSWORD}
+      name:  admin
+      password:  Admin@123
   mail:
-    host: ${MAIL_HOST}
-    port: ${MAIL_PORT}
-    username: ${MAIL_USERNAME}
-    password: ${MAIL_PASSWORD}
+    host: smtp.gmail.com
+    port: 587
+    username: adoptawallet.devnet@gmail.com
+    password: pumc kkvd qllz fghr
     protocol: smtp
     tls: true
     properties:
@@ -33,27 +33,27 @@ spring:
       static-locations: classpath:/static/
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: 7C@#3fdLk!9FzqPpA8TrVcK2NmXyTzLp
   access-token:
-    expiry-ms: ${JWT_ACCESS_EXPIRATION}
+    expiry-ms: 600000 
   refresh-token:
-    expiry-ms: ${JWT_REFRESH_EXPIRATION}
+    expiry-ms: 604800000
 
 server:
-  port: ${SERVER_PORT}
+  port: 8080
 
 email:
-  from: ${EMAIL_FROM}
+  from: adoptawallet.devnet@gmail.com
 
 github:
-  client-id: ${GITHUB_CLIENT_ID}
-  client-secret: ${GITHUB_CLIENT_SECRET}
-  redirect-uri: ${GITHUB_REDIRECT_URI}
+  client-id: Ov23limdldqmq4fyvjas
+  client-secret: 8386498d3bdd1e74daaa44a9aa89ea0e6b87c327
+  redirect-uri: http://localhost:8080/oauth/callback
 
 admin:
-  email: ${ADMIN_EMAIL}
-  username: ${ADMIN_USERNAME}
-  password: ${ADMIN_PASSWORD}
+  email: admin@codex.com
+  username: admin
+  password: Admin@123
 
 
 springdoc:

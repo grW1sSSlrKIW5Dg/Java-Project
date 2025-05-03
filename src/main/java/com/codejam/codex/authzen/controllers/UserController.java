@@ -27,6 +27,7 @@ public class UserController {
     private final AuthEndpoint authEndpoint;
     private final UserEndpoint userEndpoint;
 
+
     @Autowired
     public UserController(AuthEndpoint authEndpoint, UserEndpoint userEndpoint) {
         this.authEndpoint = authEndpoint;

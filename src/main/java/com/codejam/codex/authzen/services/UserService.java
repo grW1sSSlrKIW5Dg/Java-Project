@@ -25,24 +25,29 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
 
     public UserResponse loadUserByUsername(String usernameOrEmail) throws UsernameNotFoundException {
-        User user = new User();
+        User user = userRepository.findByUsernameOrEmail(usernameOrEmail, usernameOrEmail)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found with username or email: " + usernameOrEmail));
 
         Set<String> roles = user.getUserRoles()
-                .stream()
-                .map(userRole -> userRole.getRole().getName())
-                .collect(Collectors.toSet());
+            .stream()
+            .map(userRole -> userRole.getRole().getName())
+            .collect(Collectors.toSet());
 
         return UserResponse.builder()
-                .email(user.getEmail())
-                .username(user.getUsername())
-                .roles(roles)
-                .build();
+            .id(user.getId())
+            .email(user.getEmail())
+            .username(user.getUsername())
+            .roles(roles)
+            .build();
     }
 
 
     public UserResponse getProfile(String username) {
-        User user = new User();
-        List<String> permissionNames = new ArrayList<>();
+        User user = userRepository.findByUsername(username)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+        
+        List<String> permissionNames = userRepository.findPermissionNamesByUsername(username);
+        
         return UserResponse.fromEntity(user, permissionNames);
     }
 

@@ -33,5 +33,5 @@ build/
 .vscode/
 
 ### Enviroment ###
-.env
+.env.example
 .env.docker

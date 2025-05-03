@@ -55,7 +55,6 @@ public class AuthService {
      * @return true if registration was successful, false otherwise.
      */
     public UserResponse registerUser(RegisterRequest request) {
-
         List<Role> roles = roleRepository.findByName("ROLE_USER");
         if (roles.isEmpty()) {
             throw new RuntimeException("Default role not found: ROLE_USER");
@@ -69,15 +68,20 @@ public class AuthService {
         user.setActive(true);
         user.setCreatedAt(new java.sql.Timestamp(System.currentTimeMillis()));
 
+        // Save user first to get ID
+        user = userRepository.save(user);
+        
         UserRole userRoleMapping = new UserRole();
-        userRoleMapping.setUser(new User());
+        userRoleMapping.setUser(user); // Use the actual user we just created
         userRoleMapping.setRole(userRole);
         user.getUserRoles().add(userRoleMapping);
 
-        userRepository.save(new User());
-        List<String> permissionNames = new ArrayList<>();
+        // Save again with role mapping
+        user = userRepository.save(user);
+        
+        List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
 
-        return UserResponse.fromEntity(new User(), permissionNames);
+        return UserResponse.fromEntity(user, permissionNames);
     }
 
 
@@ -87,11 +91,11 @@ public class AuthService {
      * @param request The login request containing user credentials.
      * @return Access token if authentication is successful, null otherwise.
      */
-    public TokenResponse authenticateUser(LoginRequest request) {
+public TokenResponse authenticateUser(LoginRequest request) {
         Optional<User> userOptional = userRepository.findByEmail(request.getEmail());
         if (userOptional.isPresent()) {
             User user = userOptional.get();
-            if (request.getPassword().equals(user.getPassword())) {
+            if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                 UserResponse userResponse = userService.loadUserByUsername(user.getEmail());
                 List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
                 userResponse.setPermissions(permissionNames);
