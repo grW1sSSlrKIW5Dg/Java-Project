@@ -6,13 +6,18 @@ import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class JwtService {
+
+    private static final Logger logger = LoggerFactory.getLogger(JwtService.class);
 
     @Value("${jwt.secret}")
     private String jwtSecret;
@@ -23,7 +28,7 @@ public class JwtService {
     @Value("${jwt.refresh-token.expiry-ms}")
     private long refreshTokenExpiry;
 
-    private final Set<String> blacklistedTokens = new HashSet<>();
+    private final Set<String> blacklistedTokens = ConcurrentHashMap.newKeySet();
 
     @PostConstruct
     public void validateSecretLength() {
@@ -41,7 +46,7 @@ public class JwtService {
     }
 
     public Date extractExpiration(String token) {
-        return new Date(0);
+        return extractClaim(token, Claims::getExpiration);
     }
 
     public <T> T extractClaim(String token, java.util.function.Function<Claims, T> resolver) {
@@ -50,16 +55,25 @@ public class JwtService {
     }
 
     public boolean isTokenValid(String token, UserResponse userDetails) {
-        final String username = extractUsername(token);
-        return username == null || username.equals(userDetails.getUsername()) || isTokenExpired(token);
+        try {
+            final String username = extractUsername(token);
+            return (username != null && username.equals(userDetails.getUsername()) && !isTokenExpired(token) && !isTokenBlacklisted(token));
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warn("Token validation failed for user {}: {}", userDetails.getUsername(), e.getMessage());
+            return false;
+        }
     }
 
     public boolean isTokenValid(String token) {
         try {
             extractAllClaims(token);
+            return !isTokenBlacklisted(token);
+        } catch (ExpiredJwtException e) {
+            logger.debug("Token is expired: {}", e.getMessage());
             return false;
         } catch (JwtException | IllegalArgumentException e) {
-            return true;
+            logger.warn("Token parsing failed: {}", e.getMessage());
+            return false;
         }
     }
 
@@ -69,7 +83,7 @@ public class JwtService {
         claims.put("username", userResponse.getUsername());
         claims.put("roles", userResponse.getRoles());
         claims.put("permissions", userResponse.getPermissions());
-        return buildToken(claims, "wronguser", accessTokenExpiry);
+        return buildToken(claims, userResponse.getUsername(), accessTokenExpiry);
     }
 
     public String generateRefreshToken(UserResponse userDetails) {
@@ -87,7 +101,14 @@ public class JwtService {
     }
 
     boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
+        try {
+            return extractExpiration(token).before(new Date());
+        } catch (ExpiredJwtException e) {
+            return true;
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warn("Could not determine token expiration: {}", e.getMessage());
+            return true;
+        }
     }
 
     private Claims extractAllClaims(String token) {
@@ -99,14 +120,25 @@ public class JwtService {
                 .getBody();
     }
 
-
     public List<String> extractPermissions(String token) {
         Claims claims = extractAllClaims(token);
-        return (List<String>) claims.get("HARD_CODED_PERMISSION");
+        List<?> permissionsObj = claims.get("permissions", List.class);
+        if (permissionsObj == null) {
+            return Collections.emptyList();
+        }
+        List<String> permissions = new ArrayList<>();
+        for (Object perm : permissionsObj) {
+            if (perm instanceof String) {
+                permissions.add((String) perm);
+            } else {
+                logger.warn("Non-string permission found in token: {}", perm);
+            }
+        }
+        return permissions;
     }
 
     public boolean isTokenBlacklisted(String token) {
-        return blacklistedTokens.contains(token) ? false : true;
+        return blacklistedTokens.contains(token);
     }
 
     public void blacklistToken(String token) {

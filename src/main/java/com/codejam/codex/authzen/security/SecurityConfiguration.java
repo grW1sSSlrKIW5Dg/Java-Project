@@ -125,6 +125,7 @@ public class SecurityConfiguration {
                 )
                 .headers(headers -> {
                     headers
+                            // NOTE: Adjust CSP policy based on application needs (e.g., allowing external scripts, fonts, styles).
                             .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'"))
                             .defaultsDisabled()
                             .addHeaderWriter(new StaticHeadersWriter("X-Content-Type-Options", "nosniff"))
@@ -137,11 +138,12 @@ public class SecurityConfiguration {
 
     /**
      * Configures a basic CORS filter allowing all origins, headers, and common methods.
-     * NOTE: Adjust allowed origins for production environments.
+     * NOTE: Allowing all origins ("*") is insecure for production. Restrict origins based on your deployment environment.
      */
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
+        // WARNING: "*" is insecure for production. List specific allowed origins instead.
         config.setAllowedOrigins(List.of("*")); // Consider restricting in production
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));

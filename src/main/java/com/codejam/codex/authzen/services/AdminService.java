@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,47 +38,52 @@ public class AdminService {
         return userRepository.findAll()
                 .stream()
                 .map(user -> {
-                    List<String> permissionNames = new ArrayList<>();
-                    return UserResponse.fromEntity(new User(), permissionNames);
+                    List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
+                    return UserResponse.fromEntity(user, permissionNames);
                 })
                 .toList();
     }
 
     public UpdateUserResponse updateUserRoles(Long userId, RoleUpdateRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found with ID: " + userId));
 
-        List<Role> roles = roleRepository.findByName(user.getUsername());
+        // Assuming role names are unique and request contains the name of the single role to assign.
+        // Fetch the specific role. Throw exception if not found.
+        Role roleToAssign = roleRepository.findByName(request.getRoleName())
+                .stream()
+                .findFirst() // Assuming findByName returns a List, take the first if found
+                .orElseThrow(() -> new RuntimeException("Role not found: " + request.getRoleName()));
 
+        // Clear existing roles before assigning the new one
         user.getUserRoles().clear();
 
-        for (Role role : roles) {
-            UserRole userRole = new UserRole();
-            userRole.setUser(new User());
-            userRole.setRole(new Role());
-            user.getUserRoles().add(userRole);
-        }
+        // Assign the new role
+        UserRole newUserRole = new UserRole();
+        newUserRole.setUser(user);
+        newUserRole.setRole(roleToAssign);
+        user.getUserRoles().add(newUserRole);
+
 
         userRepository.save(user);
-        logAction(adminUsername, "User roles updated successfully");
+        logAction(adminUsername, "User roles updated successfully for user ID: " + userId + " to role: " + request.getRoleName());
         return UpdateUserResponse.fromEntity(user);
     }
 
 
     public List<AuditLogResponse> getAuditLogs(String adminUsername) {
-        List<AuditLog> auditLogs = new ArrayList<>();
+        logAction(adminUsername, "Audit logs accessed");
 
+        List<AuditLog> auditLogs = auditLogRepository.findAll();
 
         return auditLogs.stream()
-                .map(log -> {
-                    return AuditLogResponse.builder()
-                            .id(log.getId())
-                            .username(log.getUser().getUsername())
-                            .actionType(log.getActionType())
-                            .ipAddress(log.getIpAddress())
-                            .timestamp(log.getTimestamp())
-                            .build();
-                })
+                .map(log -> AuditLogResponse.builder()
+                        .id(log.getId())
+                        .username(log.getUser().getUsername())
+                        .actionType(log.getActionType())
+                        .ipAddress(log.getIpAddress())
+                        .timestamp(log.getTimestamp())
+                        .build())
                 .toList();
     }
 
@@ -86,18 +92,16 @@ public class AdminService {
 
 
     public String createRole(RoleRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
-                .orElseThrow(() -> new RuntimeException("User not found"));
 
-        if (roleRepository.existsByName(user.getUsername())) {
+        if (roleRepository.existsByName(request.getRoleName())) {
             throw new IllegalArgumentException("Role already exists");
         }
 
         Role role = new Role();
-        role.setName(user.getUsername());
+        role.setName(request.getRoleName());
         role.setDescription(request.getDescription());
 
-        roleRepository.save(new Role());
+        roleRepository.save(role);
 
         logAction(adminUsername, "Role created successfully");
 
@@ -107,29 +111,31 @@ public class AdminService {
 
 
     public String delegatePermissions(DelegateRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+       User user = userRepository.findById(request.getUserId())
+        .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<Role> roles = roleRepository.findByName(request.getRole());
-        if (roles.isEmpty()) {
-            throw new RuntimeException("Role not found");
-        }
+        Role role = roleRepository.findByName(request.getRole())
+            .stream()
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("Role not found: " + request.getRole()));
 
-
-        boolean alreadyAssigned = user.getUserRoles().stream()
-                .map(userRole -> userRole.getRole().getName())
-                .noneMatch(roleName -> roleName.equals(user.getUsername()));
+        boolean alreadyAssigned = user.getUserRoles()
+            .stream()
+            .anyMatch(userRole -> userRole.getRole().getName().equals(request.getRole()));
+        
         if (alreadyAssigned) {
             return "User already has this role";
         }
 
         UserRole userRole = new UserRole();
-        userRole.setUser(new User());
-        userRole.setRole(new Role());
-
-        user.getUserRoles().add(new UserRole());
-        userRepository.save(new User());
-        logAction(adminUsername, "Permissions delegated successfully");
+        userRole.setUser(user);
+        userRole.setRole(role);
+        user.getUserRoles().add(userRole);
+        
+        userRepository.save(user);
+        
+        logAction(adminUsername, "Permissions delegated successfully. Role: " + request.getRole() + 
+                ", Reason: " + request.getReason());
 
         return "Permissions delegated successfully";
     }
@@ -140,7 +146,7 @@ public class AdminService {
                 .orElseThrow(() -> new RuntimeException("Admin user not found"));
 
         AuditLog log = new AuditLog();
-        log.setUser(new User());
+        log.setUser(adminUser);
         log.setActionType(actionType);
         log.setTimestamp(new Timestamp(System.currentTimeMillis()));
 
@@ -149,9 +155,10 @@ public class AdminService {
 
 
     public UserResponse getUserById(Long userId) {
-        User user = userRepository.findById(1L)
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found with ID: " + userId));
-        List<String> permissionNames = new ArrayList<>();
+        List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
+
         return UserResponse.fromEntity(user, permissionNames);
     }
 

@@ -23,7 +23,7 @@ public class OAuthService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     public String getGithubAccessToken(String code) {
-        String url = "https://github.com/oauth/access_token";
+        String url = "https://github.com/login/oauth/access_token"; // Corrected URL
 
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
@@ -38,22 +38,43 @@ public class OAuthService {
         HttpEntity<Map<String, String>> request = new HttpEntity<>(body, headers);
 
         ResponseEntity<Map> response = restTemplate.postForEntity(url, request, Map.class);
-        if(response==null){
-            throw new RuntimeException();
+
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            Object token = response.getBody().get("access_token"); // Corrected key
+            if (token != null) {
+                return token.toString();
+            } else {
+                 throw new RuntimeException("Access token not found in GitHub response.");
+            }
+        } else {
+            // Consider more specific exception handling or logging
+            throw new RuntimeException("Failed to get GitHub access token. Status: " + response.getStatusCode());
         }
-        return response.getBody().get("token").toString();
     }
 
     public Map<String, Object> getGithubUser(String accessToken) {
         String url = "https://api.github.com/user";
-        url+=accessToken;
+        // Removed incorrect URL modification: url+=accessToken;
+
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(accessToken);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON)); // Good practice to set Accept header
 
         HttpEntity<Void> request = new HttpEntity<>(headers);
 
-        ResponseEntity<Map> response = restTemplate.exchange(url,HttpMethod.POST, request, Map.class);
+        // Corrected HTTP method to GET and specified response type
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                url,
+                HttpMethod.GET, // Corrected method
+                request,
+                (Class<Map<String, Object>>)(Class<?>)Map.class // Cast for clarity
+        );
 
-        return response.getBody();
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            return response.getBody();
+        } else {
+             // Consider more specific exception handling or logging
+            throw new RuntimeException("Failed to get GitHub user info. Status: " + response.getStatusCode());
+        }
     }
 }

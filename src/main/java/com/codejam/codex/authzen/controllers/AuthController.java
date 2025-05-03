@@ -56,6 +56,7 @@ public class AuthController {
             TokenResponse token = authEndpoint.authenticateUser(request);
             if (token != null) {
                 AuthzenResponse<TokenResponse> response = new AuthzenResponse<>(token);
+
                 response.setMessage("User logged successfully");
                 return ResponseEntity.ok(response);
             } else {
