@@ -48,7 +48,7 @@ email:
 github:
   client-id: Ov23limdldqmq4fyvjas
   client-secret: 8386498d3bdd1e74daaa44a9aa89ea0e6b87c327
-  redirect-uri: http://localhost:8080/oauth/callback
+  redirect-uri: http://localhost:8080/api/authenticate/auth/oauth
 
 admin:
   email: admin@codex.com

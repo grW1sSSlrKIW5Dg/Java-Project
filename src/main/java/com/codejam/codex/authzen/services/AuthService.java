@@ -236,7 +236,7 @@ public TokenResponse authenticateUser(LoginRequest request) {
      */
     public boolean isAuthenticated(HttpServletRequest request) {
         final String token = extractTokenFromHeader(request);
-        if ((token == null || !jwtService.isTokenValid(token)) && isBlacklisted(token) ) {
+        if (token == null || !jwtService.isTokenValid(token) || isBlacklisted(token)) {
             return false;
         }
 
@@ -267,7 +267,7 @@ public TokenResponse authenticateUser(LoginRequest request) {
      */
     public String getUsername(HttpServletRequest request) {
         final String token = extractTokenFromHeader(request);
-        if ((token == null || !jwtService.isTokenValid(token)) && isBlacklisted(token) ) {
+        if (token == null || !jwtService.isTokenValid(token) || isBlacklisted(token)) {
             return null;
         }
         return jwtService.extractUsername(token);
@@ -329,12 +329,19 @@ public TokenResponse authenticateUser(LoginRequest request) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
+        // Revoke the old refresh token
+        tokenRecord.setRevoked(true);
+        refreshTokenRepository.save(tokenRecord);
+
         List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
 
         UserResponse userDetails = UserResponse.fromEntity(user, permissionNames);
 
         String newAccessToken = jwtService.generateAccessToken(userDetails);
         String newRefreshToken = jwtService.generateRefreshToken(userDetails);
+
+        // Save the new refresh token
+        saveRefreshToken(user, newRefreshToken);
 
         return TokenResponse.builder().accessToken(newAccessToken).refreshToken(newRefreshToken).build();
     }
@@ -367,7 +374,26 @@ public TokenResponse authenticateUser(LoginRequest request) {
      * @return true if the token is blacklisted, false otherwise.
      */
     public boolean isBlacklisted(String token) {
-        return blacklistedTokens.contains(token);
+        return token != null && blacklistedTokens.contains(token);
+    }
+
+    /**
+     * Cleans up expired tokens from the blacklist.
+     * Should be scheduled to run periodically.
+     */
+    public void cleanupBlacklist() {
+        Iterator<String> iterator = blacklistedTokens.iterator();
+        while (iterator.hasNext()) {
+            String token = iterator.next();
+            try {
+                if (!jwtService.isTokenValid(token)) {
+                    iterator.remove();
+                }
+            } catch (Exception e) {
+                // If token parsing fails, it's invalid, so remove it
+                iterator.remove();
+            }
+        }
     }
 
 
