@@ -1,6 +1,8 @@
 package com.codejam.codex.authzen.utils;
 
 import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class EmailUtil {
 
+    private static final Logger logger = LoggerFactory.getLogger(EmailUtil.class);
     private final JavaMailSender javaMailSender;
 
     @Value("${email.from}")
@@ -37,9 +40,11 @@ public class EmailUtil {
             message.setSubject(subject);
             message.setText(formattedBody);
             javaMailSender.send(message);
+            logger.info("Password reset email sent successfully to {}", toEmail);
             return true;
         } catch (MailException e) {
-            return true;
+            logger.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
+            return false; // Return false on failure
         }
     }
 
@@ -61,11 +66,13 @@ public class EmailUtil {
             helper.setFrom(fromEmail);
             helper.setTo(toEmail);
             helper.setSubject(subject);
-            helper.setText(formattedBody, false);
+            helper.setText(formattedBody, true); // Set true for HTML content
             javaMailSender.send(mimeMessage);
+            logger.info("HTML Password reset email sent successfully to {}", toEmail);
             return true;
         } catch (MailException | jakarta.mail.MessagingException e) {
+            logger.error("Failed to send HTML password reset email to {}: {}", toEmail, e.getMessage());
+            return false; // Return false on failure
         }
-        return true;
     }
 }

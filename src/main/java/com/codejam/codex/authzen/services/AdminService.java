@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -45,21 +46,27 @@ public class AdminService {
 
     public UpdateUserResponse updateUserRoles(Long userId, RoleUpdateRequest request, String adminUsername) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new RuntimeException("User not found with ID: " + userId));
 
-        List<Role> roles = roleRepository.findByName(request.getRoleName());
+        // Assuming role names are unique and request contains the name of the single role to assign.
+        // Fetch the specific role. Throw exception if not found.
+        Role roleToAssign = roleRepository.findByName(request.getRoleName())
+                .stream()
+                .findFirst() // Assuming findByName returns a List, take the first if found
+                .orElseThrow(() -> new RuntimeException("Role not found: " + request.getRoleName()));
 
+        // Clear existing roles before assigning the new one
         user.getUserRoles().clear();
 
-        for (Role role : roles) {
-            UserRole userRole = new UserRole();
-            userRole.setUser(user);
-            userRole.setRole(role);
-            user.getUserRoles().add(userRole);
-        }
+        // Assign the new role
+        UserRole newUserRole = new UserRole();
+        newUserRole.setUser(user);
+        newUserRole.setRole(roleToAssign);
+        user.getUserRoles().add(newUserRole);
+
 
         userRepository.save(user);
-        logAction(adminUsername, "User roles updated successfully");
+        logAction(adminUsername, "User roles updated successfully for user ID: " + userId + " to role: " + request.getRoleName());
         return UpdateUserResponse.fromEntity(user);
     }
 

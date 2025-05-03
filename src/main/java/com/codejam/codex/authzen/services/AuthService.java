@@ -31,6 +31,8 @@ public class AuthService {
     private final OAuthService oAuthService;
     private final RoleRepository roleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    // NOTE: In-memory blacklist is not suitable for production/distributed environments.
+    // Consider using a persistent store (e.g., Redis, Database) for reliable blacklisting.
     private final Set<String> blacklistedTokens = new HashSet<>();
 
     @Autowired
@@ -52,11 +54,12 @@ public class AuthService {
      * Registers a new user.
      *
      * @param request The registration request containing user details.
-     * @return true if registration was successful, false otherwise.
+     * @return UserResponse containing details of the registered user.
      */
     public UserResponse registerUser(RegisterRequest request) {
         List<Role> roles = roleRepository.findByName("ROLE_USER");
         if (roles.isEmpty()) {
+            // Consider creating the role if it doesn't exist or throwing a more specific configuration exception
             throw new RuntimeException("Default role not found: ROLE_USER");
         }
         Role userRole = roles.get(0);
@@ -65,20 +68,20 @@ public class AuthService {
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setActive(true);
+        user.setActive(true); // Consider if users should be active immediately or require verification
         user.setCreatedAt(new java.sql.Timestamp(System.currentTimeMillis()));
+        user.setUserRoles(new HashSet<>()); // Initialize the set
 
-        // Save user first to get ID
-        user = userRepository.save(user);
-        
+        // Create and associate the UserRole before saving the User
         UserRole userRoleMapping = new UserRole();
-        userRoleMapping.setUser(user); // Use the actual user we just created
+        userRoleMapping.setUser(user);
         userRoleMapping.setRole(userRole);
         user.getUserRoles().add(userRoleMapping);
 
-        // Save again with role mapping
+        // Save the user with the role mapping in a single operation
         user = userRepository.save(user);
-        
+
+        // Fetch permissions associated with the user's roles
         List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
 
         return UserResponse.fromEntity(user, permissionNames);
@@ -89,72 +92,109 @@ public class AuthService {
      * Authenticates a user and issues an access token.
      *
      * @param request The login request containing user credentials.
-     * @return Access token if authentication is successful, null otherwise.
+     * @return TokenResponse containing access and refresh tokens if authentication is successful, null otherwise.
      */
-public TokenResponse authenticateUser(LoginRequest request) {
+    public TokenResponse authenticateUser(LoginRequest request) {
         Optional<User> userOptional = userRepository.findByEmail(request.getEmail());
         if (userOptional.isPresent()) {
             User user = userOptional.get();
             if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-                UserResponse userResponse = userService.loadUserByUsername(user.getEmail());
+                // Use the fetched user entity directly
                 List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
-                userResponse.setPermissions(permissionNames);
+                UserResponse userResponse = UserResponse.fromEntity(user, permissionNames); // Build UserResponse from the entity
+
                 String accessToken = jwtService.generateAccessToken(userResponse);
                 String refreshToken = jwtService.generateRefreshToken(userResponse);
                 saveRefreshToken(user, refreshToken);
                 return new TokenResponse(accessToken, refreshToken);
             }
         }
-        return null;
+        return null; // Consider throwing specific exceptions for failed login (e.g., BadCredentialsException)
     }
 
     /**
      * Handles OAuth login and generates OAuth token.
      *
      * @param request The OAuth login request containing OAuth credentials.
-     * @return OAuth token if successful, null otherwise.
+     * @return TokenResponse containing access and refresh tokens if successful, null otherwise.
      */
     public TokenResponse authenticateOAuth(OAuthRequest request) {
+        // TODO: Make provider handling more generic or use a factory/strategy pattern
         if ("github".equalsIgnoreCase(request.getProvider())) {
             String oAuthAccessToken = oAuthService.getGithubAccessToken(request.getOauthToken());
             Map<String, Object> githubUser = oAuthService.getGithubUser(oAuthAccessToken);
 
             String githubId = githubUser.get("id").toString();
+            // Handle potential null email from GitHub
             String githubEmail = (String) githubUser.get("email");
             String githubLogin = (String) githubUser.get("login");
+
+            if (githubEmail == null || githubEmail.isEmpty()) {
+                // Decide how to handle users without a public email (e.g., prompt user, use a placeholder)
+                throw new RuntimeException("GitHub user email is not available or public.");
+            }
 
             Optional<OauthProvider> providerOpt = oauthProviderRepository.findByProviderAndExternalUserId("github", githubId);
             User user;
             if (providerOpt.isPresent()) {
                 user = providerOpt.get().getUser();
             } else {
+                // Check if a user with this email already exists (maybe registered directly)
                 Optional<User> existingUserOpt = userRepository.findByEmail(githubEmail);
                 if (existingUserOpt.isPresent()) {
                     user = existingUserOpt.get();
+                    // Link the existing user account to the GitHub provider
+                    if (oauthProviderRepository.findByProviderAndUser("github", user).isEmpty()) {
+                         oauthProviderRepository.save(OauthProvider.builder()
+                            .provider("github")
+                            .externalUserId(githubId)
+                            .user(user)
+                            .build());
+                    }
                 } else {
+                    // Create a new user for this GitHub login
+                    List<Role> roles = roleRepository.findByName("ROLE_USER");
+                    if (roles.isEmpty()) {
+                        throw new RuntimeException("Default role not found: ROLE_USER");
+                    }
+                    Role userRole = roles.get(0);
+
                     user = User.builder()
-                            .username(githubLogin)
+                            .username(githubLogin) // Consider potential username conflicts
                             .email(githubEmail)
                             .isActive(true)
                             .isLocked(false)
+                            .createdAt(new java.sql.Timestamp(System.currentTimeMillis()))
                             .userRoles(new HashSet<>())
                             .build();
-                    user = userRepository.save(user);
+
+                    UserRole userRoleMapping = new UserRole();
+                    userRoleMapping.setUser(user);
+                    userRoleMapping.setRole(userRole);
+                    user.getUserRoles().add(userRoleMapping);
+
+                    user = userRepository.save(user); // Save the new user
+
+                    // Save the OAuth provider link
+                    oauthProviderRepository.save(OauthProvider.builder()
+                            .provider("github")
+                            .externalUserId(githubId)
+                            .user(user)
+                            .build());
                 }
-                oauthProviderRepository.save(OauthProvider.builder()
-                        .provider("github")
-                        .externalUserId(githubId)
-                        .user(user)
-                        .build());
             }
 
-            UserResponse userResponse = userService.loadUserByUsername(user.getEmail());
+            // Use the determined user entity directly
+            List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
+            UserResponse userResponse = UserResponse.fromEntity(user, permissionNames); // Build UserResponse from the entity
+
             String accessToken = jwtService.generateAccessToken(userResponse);
             String refreshToken = jwtService.generateRefreshToken(userResponse);
+            saveRefreshToken(user, refreshToken); // Save refresh token for OAuth user as well
 
             return new TokenResponse(accessToken, refreshToken);
         }
-
+        // TODO: Handle other providers or return an appropriate error/response
         return null;
     }
 
@@ -170,20 +210,32 @@ public TokenResponse authenticateUser(LoginRequest request) {
         if (userOptional.isPresent()) {
             User user = userOptional.get();
 
+            // Check if user registered via OAuth and doesn't have a local password set
+            // If so, password reset might not be applicable. Decide on the desired behavior.
+            // if (user.getPassword() == null || user.getPassword().isEmpty()) {
+            //     // Handle case where user has no local password (e.g., OAuth only)
+            //     return false; // Or throw an exception, or send a different kind of email
+            // }
+
+
             EmailToken token = EmailToken.builder()
                     .user(user)
                     .token(UUID.randomUUID().toString())
                     .purpose("RESET_PASSWORD")
-                    .expiresAt(Timestamp.from(Instant.now().plus(15, ChronoUnit.MINUTES)))
+                    .expiresAt(Timestamp.from(Instant.now().plus(15, ChronoUnit.MINUTES))) // Expiry duration could be configurable
                     .build();
 
             emailTokenRepository.save(token);
 
+            // TODO: Make the base URL configurable (e.g., via application properties)
             String resetLink = "http://localhost:8080/reset-password/reset-password.html?token=" + token.getToken();
 
             String subject = "Password Reset Request";
-            String body = "You have requested to reset your password. Click the link below to reset your password:\n" + resetLink;
+            // Consider using email templates for better formatting and internationalization
+            String body = "You have requested to reset your password. Click the link below to reset your password:\n" + resetLink +
+                          "\nIf you did not request this, please ignore this email.";
 
+            // Assuming emailUtil handles the sending logic correctly
             return emailUtil.sendPasswordResetEmail(request.getEmail(), subject, body, resetLink);
         }
         return false;
@@ -201,31 +253,38 @@ public TokenResponse authenticateUser(LoginRequest request) {
         if (tokenOptional.isPresent()) {
             EmailToken token = tokenOptional.get();
 
+            // 1. Check expiry
             if (token.getExpiresAt().before(Timestamp.from(Instant.now()))) {
-                return false;
+                emailTokenRepository.delete(token); // Clean up expired token
+                return false; // Token expired
             }
 
+            // 2. Check purpose
             if (!"RESET_PASSWORD".equals(token.getPurpose())) {
-                return false;
+                return false; // Invalid token purpose
             }
 
-            Optional<User> userOptional = userRepository.findByEmail(request.getEmail());
-            if (userOptional.isPresent()) {
-                User user = userOptional.get();
-
-                if (!user.equals(token.getUser())) {
-                    return false;
-                }
-
-                user.setPassword(passwordEncoder.encode(request.getNewPassword()));
-                userRepository.save(user);
-
-                emailTokenRepository.delete(token);
-
-                return true;
+            // 3. Get user directly from token
+            User user = token.getUser();
+            if (user == null) {
+                 return false; // Should not happen if DB constraints are set, but good practice to check
             }
+
+            // 4. Optional: Verify email matches (as an extra check against token misuse if email is known)
+            if (!user.getEmail().equalsIgnoreCase(request.getEmail())) {
+                return false; // Email in request doesn't match user associated with token
+            }
+
+            // 5. Update password
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            userRepository.save(user);
+
+            // 6. Delete the used token
+            emailTokenRepository.delete(token);
+
+            return true;
         }
-        return false;
+        return false; // Token not found
     }
 
     /**
@@ -348,6 +407,8 @@ public TokenResponse authenticateUser(LoginRequest request) {
 
     /**
      * Blacklists the token associated with the incoming request if valid and not already blacklisted.
+     * NOTE: This uses an in-memory blacklist, which is lost on restart and not suitable for
+     * distributed environments. Use a persistent store (e.g., Redis, Database) for production.
      *
      * @param request HttpServletRequest containing the token to be blacklisted.
      * @return true if the token was successfully added to the blacklist; false if the token is invalid
@@ -355,20 +416,25 @@ public TokenResponse authenticateUser(LoginRequest request) {
      */
     public boolean blacklistToken(HttpServletRequest request) {
         String token = extractTokenFromHeader(request);
+        // Validate token before blacklisting to avoid storing invalid tokens
         if (token == null || !jwtService.isTokenValid(token)) {
-            return false;
+            return false; // Token is invalid or expired, no need to blacklist
         }
 
+        // Check if already blacklisted
         if (isBlacklisted(token)) {
-            return false;
+            return false; // Already blacklisted
         }
 
+        // Add to the blacklist
         blacklistedTokens.add(token);
+        // Consider logging the blacklisting event
         return true;
     }
 
     /**
      * Checks if a token is blacklisted.
+     * NOTE: Checks against an in-memory blacklist.
      *
      * @param token The token to check.
      * @return true if the token is blacklisted, false otherwise.
@@ -378,22 +444,24 @@ public TokenResponse authenticateUser(LoginRequest request) {
     }
 
     /**
-     * Cleans up expired tokens from the blacklist.
-     * Should be scheduled to run periodically.
+     * Cleans up expired tokens from the in-memory blacklist.
+     * NOTE: This method needs to be scheduled (e.g., using @Scheduled annotation and enabling scheduling)
+     * to run periodically for the in-memory blacklist to be effective.
+     * Using a persistent store with TTL (like Redis) often simplifies expiry management.
      */
+    // Add @Scheduled annotation if enabling scheduling (e.g., @Scheduled(fixedRate = 3600000) // Run every hour)
     public void cleanupBlacklist() {
-        Iterator<String> iterator = blacklistedTokens.iterator();
-        while (iterator.hasNext()) {
-            String token = iterator.next();
+        // Use removeIf for cleaner iteration and removal
+        blacklistedTokens.removeIf(token -> {
             try {
-                if (!jwtService.isTokenValid(token)) {
-                    iterator.remove();
-                }
+                // If the token is no longer valid (e.g., expired), remove it from the blacklist
+                return !jwtService.isTokenValid(token);
             } catch (Exception e) {
-                // If token parsing fails, it's invalid, so remove it
-                iterator.remove();
+                // If token parsing fails for any reason, treat it as invalid and remove it
+                // Consider logging the exception
+                return true;
             }
-        }
+        });
     }
 
 
