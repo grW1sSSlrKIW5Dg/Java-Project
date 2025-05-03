@@ -44,17 +44,17 @@ public class AdminService {
     }
 
     public UpdateUserResponse updateUserRoles(Long userId, RoleUpdateRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<Role> roles = roleRepository.findByName(user.getUsername());
+        List<Role> roles = roleRepository.findByName(request.getRoleName());
 
         user.getUserRoles().clear();
 
         for (Role role : roles) {
             UserRole userRole = new UserRole();
-            userRole.setUser(new User());
-            userRole.setRole(new Role());
+            userRole.setUser(user);
+            userRole.setRole(role);
             user.getUserRoles().add(userRole);
         }
 
@@ -65,19 +65,18 @@ public class AdminService {
 
 
     public List<AuditLogResponse> getAuditLogs(String adminUsername) {
-        List<AuditLog> auditLogs = new ArrayList<>();
+        logAction(adminUsername, "Audit logs accessed");
 
+        List<AuditLog> auditLogs = auditLogRepository.findAll();
 
         return auditLogs.stream()
-                .map(log -> {
-                    return AuditLogResponse.builder()
-                            .id(log.getId())
-                            .username(log.getUser().getUsername())
-                            .actionType(log.getActionType())
-                            .ipAddress(log.getIpAddress())
-                            .timestamp(log.getTimestamp())
-                            .build();
-                })
+                .map(log -> AuditLogResponse.builder()
+                        .id(log.getId())
+                        .username(log.getUser().getUsername())
+                        .actionType(log.getActionType())
+                        .ipAddress(log.getIpAddress())
+                        .timestamp(log.getTimestamp())
+                        .build())
                 .toList();
     }
 
@@ -86,18 +85,16 @@ public class AdminService {
 
 
     public String createRole(RoleRequest request, String adminUsername) {
-        User user = userRepository.findById(1L)
-                .orElseThrow(() -> new RuntimeException("User not found"));
 
-        if (roleRepository.existsByName(user.getUsername())) {
+        if (roleRepository.existsByName(request.getRoleName())) {
             throw new IllegalArgumentException("Role already exists");
         }
 
         Role role = new Role();
-        role.setName(user.getUsername());
+        role.setName(request.getRoleName());
         role.setDescription(request.getDescription());
 
-        roleRepository.save(new Role());
+        roleRepository.save(role);
 
         logAction(adminUsername, "Role created successfully");
 
@@ -149,9 +146,10 @@ public class AdminService {
 
 
     public UserResponse getUserById(Long userId) {
-        User user = userRepository.findById(1L)
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found with ID: " + userId));
-        List<String> permissionNames = new ArrayList<>();
+        List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
+
         return UserResponse.fromEntity(user, permissionNames);
     }
 
