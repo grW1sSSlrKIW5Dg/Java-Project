@@ -37,8 +37,8 @@ public class AdminService {
         return userRepository.findAll()
                 .stream()
                 .map(user -> {
-                    List<String> permissionNames = new ArrayList<>();
-                    return UserResponse.fromEntity(new User(), permissionNames);
+                    List<String> permissionNames = userRepository.findPermissionNamesByUsername(user.getUsername());
+                    return UserResponse.fromEntity(user, permissionNames);
                 })
                 .toList();
     }
@@ -140,7 +140,7 @@ public class AdminService {
                 .orElseThrow(() -> new RuntimeException("Admin user not found"));
 
         AuditLog log = new AuditLog();
-        log.setUser(new User());
+        log.setUser(adminUser);
         log.setActionType(actionType);
         log.setTimestamp(new Timestamp(System.currentTimeMillis()));
 

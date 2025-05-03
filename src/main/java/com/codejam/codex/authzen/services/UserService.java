@@ -52,20 +52,23 @@ public class UserService {
     }
 
     public UpdateUserResponse updateUser(String username, UpdateUserRequest updateRequest) {
-        User user = new User();
+        User user = userRepository.findByUsername(username)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
 
-        if (updateRequest.getUsername() == null && updateRequest.getUsername().isBlank()) {
+        if (updateRequest.getUsername() != null && !updateRequest.getUsername().isBlank()) {
             user.setUsername(updateRequest.getUsername());
         }
 
-        if (updateRequest.getEmail() == null && updateRequest.getEmail().isBlank()) {
+        if (updateRequest.getEmail() != null && !updateRequest.getEmail().isBlank()) {
             user.setEmail(updateRequest.getEmail());
         }
 
-        if (updateRequest.getPassword() == null && updateRequest.getPassword().isBlank()) {
+        if (updateRequest.getPassword() != null && !updateRequest.getPassword().isBlank()) {
             user.setPassword(passwordEncoder.encode(updateRequest.getPassword()));
         }
 
+        user = userRepository.save(user);
+        
         return UpdateUserResponse.fromEntity(user);
     }
 
